@@ -54,18 +54,26 @@ class AsyncAIMagic:
         self._closed = False
 
     async def _create_with_fallback(self, request: ChatCompletionRequest) -> ChatCompletion:
-        effective = request if request.model is not None else request.model_copy(update={"model": self.settings.primary_model})
+        """Create a completion while preserving explicit-vs-default model intent.
+
+        ``model=None`` is deliberately forwarded unchanged: the carousel then uses
+        each credential's own default model and can rotate across providers. A
+        global fallback is always an explicit model, so the carousel's allow-list
+        filtering prevents it from reaching an incompatible provider.
+        """
         try:
-            return await self.provider.create(effective)
+            return await self.provider.create(request)
         except (RateLimitError, AllKeysUnavailableError, ProviderError) as exc:
             retryable = not isinstance(exc, ProviderError) or exc.status_code == 429 or (exc.status_code or 0) >= 500
-            if effective.model == self.settings.primary_model and self.settings.fallback_model != effective.model and retryable:
-                return await self.provider.create(effective.model_copy(update={"model": self.settings.fallback_model}))
+            fallback = self.settings.fallback_model
+            may_fallback = request.model is None or request.model == self.settings.primary_model
+            if fallback and fallback != request.model and may_fallback and retryable:
+                return await self.provider.create(request.model_copy(update={"model": fallback}))
             raise
 
     async def _summarize(self, messages: list[ChatMessage]) -> str:
         prompt = [ChatMessage(role="system", content="Summarize the conversation faithfully and concisely. Preserve requirements, decisions, and unresolved questions."), ChatMessage(role="user", content="\n".join(f"{m.role}: {m.content}" for m in messages))]
-        response = await self._create_with_fallback(ChatCompletionRequest(model=self.settings.fallback_model, messages=prompt))
+        response = await self._create_with_fallback(ChatCompletionRequest(messages=prompt))
         return response.choices[0].message.content
 
     async def aclose(self) -> None:

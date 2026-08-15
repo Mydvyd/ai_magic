@@ -7,6 +7,7 @@ from email.utils import format_datetime
 
 import pytest
 
+from ai_magic import chat
 from ai_magic.adapters import CohereAdapter
 from ai_magic.client import AsyncAIMagic
 from ai_magic.config import Settings
@@ -73,8 +74,33 @@ async def test_model_fallback_without_network():
     client = AsyncAIMagic(settings, provider=provider)
     response = await client.chat.completions.create(messages=[{"role": "user", "content": "hi"}])
     assert response.model == settings.fallback_model
-    assert provider.models == [settings.primary_model, settings.fallback_model]
+    assert provider.models == [None, settings.fallback_model]
     await client.aclose()
+
+
+def test_exact_gemini_python_config_and_model_id_validation():
+    settings = Settings(
+        credentials=[{
+            "provider": "gemini",
+            "key": "placeholder-not-a-real-key",
+            "models": ["gemini-3.7-flash", "gemini-3.6-flash"],
+        }],
+        primary_model="gemini-3.7-flash",
+        fallback_model="gemini-3.6-flash",
+        timeout=60,
+        max_retries=0,
+        max_credential_wait=30,
+    )
+    client = AsyncAIMagic(settings)
+    assert client.settings is settings
+    asyncio.run(client.aclose())
+
+    with pytest.raises(ValueError, match="Gemini model IDs"):
+        Settings(credentials=[{
+            "provider": "gemini",
+            "key": "placeholder",
+            "models": ["Gemini-3.7-Flash"],
+        }])
 
 
 def test_registry_and_openrouter_headers():
@@ -106,6 +132,9 @@ class CarouselTransport:
     def __init__(self):
         self.calls = []
 
+    async def aclose(self):
+        pass
+
     async def post(self, url, **kwargs):
         self.calls.append((url, kwargs))
         if len(self.calls) == 1:
@@ -125,6 +154,24 @@ async def test_cross_provider_carousel_on_429():
     assert response.choices[0].message.content == "ok"
     assert transport.calls[0][0].endswith("/v1/chat")
     assert transport.calls[1][0].endswith("/openai/v1/chat/completions")
+
+
+@pytest.mark.asyncio
+async def test_high_level_chat_with_injected_client_rotates_per_credential_defaults():
+    transport = CarouselTransport()
+    settings = Settings(
+        credentials=[
+            {"provider": "cohere", "key": "one", "models": ["command-r"]},
+            {"provider": "groq", "key": "two", "models": ["groq-model"]},
+        ],
+        fallback_model="groq-model",
+    )
+    client = AsyncAIMagic(settings, transport=transport)
+    result = await chat("hi", client=client)
+    assert result == "ok"
+    assert transport.calls[0][0].endswith("/v1/chat")
+    assert transport.calls[1][0].endswith("/openai/v1/chat/completions")
+    await client.aclose()
 
 
 class RecordingTransport:

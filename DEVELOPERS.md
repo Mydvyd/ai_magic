@@ -49,9 +49,11 @@ Retry layering ограничен: по умолчанию transport retries в�
 
 ## Session summary и fallback
 
-`SessionManager` хранит историю по `session_id`, сохраняет system prompts и при превышении лимита вызывает summarizer. Защита `_summarizing` предотвращает рекурсивное суммирование.
+`SessionManager` хранит историю по `session_id`, сохраняет system prompts и при превышении лимита вызывает summarizer. Защита `_summarizing` предотвращает рекурсивное суммирование. Summarizer без явной модели сохраняет ту же provider-aware семантику, что обычный запрос.
 
-Fallback выполняется только после retryable ошибки primary model. Fallback model передаётся как явный `model=` и потому применяется принудительно, но только к совместимым credentials.
+Отсутствующий `model` нельзя заменять на `Settings.primary_model`: он означает «использовать default выбранного credential» и сохраняет ротацию между providers. Явный `model` авторитетен и фильтрует credentials по allow-list. `primary_model` остаётся default для legacy key-list конфигурации и маркером primary при явном выборе; `fallback_model` после retryable ошибки передаётся как явная модель и потому применяется только к совместимым credentials. Запрос с другой явно выбранной моделью не переключается на глобальный fallback.
+
+Для Gemini `Settings` отклоняет model IDs с uppercase/недопустимым REST-форматом. Это проверяет синтаксис, но не доступность модели конкретному аккаунту.
 
 ## Dependency injection
 

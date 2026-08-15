@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
+
+
+_GEMINI_MODEL_ID = re.compile(r"^[a-z0-9][a-z0-9.-]*$")
 
 
 class Settings(BaseModel):
@@ -27,6 +31,30 @@ class Settings(BaseModel):
     def validate_keys(self) -> "Settings":
         if not self.credentials and not (self.groq_api_keys if self.provider == "groq" else self.gemini_api_keys):
             raise ValueError("At least one API credential is required")
+        for credential in self.credentials:
+            provider = str(credential.get("provider", self.provider)).strip().lower()
+            if not credential.get("key"):
+                raise ValueError("Every credential requires a non-empty key")
+            raw_models = credential.get("models") or ()
+            models = [raw_models] if isinstance(raw_models, str) else list(raw_models)
+            if credential.get("model") is not None:
+                models.append(credential["model"])
+            if provider == "gemini":
+                invalid = [model for model in models if not isinstance(model, str) or not _GEMINI_MODEL_ID.fullmatch(model)]
+                if invalid:
+                    raise ValueError(
+                        "Gemini model IDs must be lowercase and use provider REST IDs "
+                        "(for example, 'gemini-3.7-flash')"
+                    )
+        providers = {str(item.get("provider", self.provider)).strip().lower() for item in self.credentials}
+        if not self.credentials and self.gemini_api_keys:
+            providers = {"gemini"}
+        if providers == {"gemini"}:
+            global_models = (self.primary_model, self.fallback_model)
+            if any(not _GEMINI_MODEL_ID.fullmatch(model) for model in global_models):
+                raise ValueError(
+                    "Gemini primary_model/fallback_model must be lowercase provider REST IDs"
+                )
         return self
 
     @classmethod

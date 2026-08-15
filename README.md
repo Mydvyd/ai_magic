@@ -62,128 +62,153 @@ python -m pip install -e .
 
 **Для каждого провайдера нужен собственный API key**, полученный у этого провайдера. Ключ одного сервиса нельзя использовать для другого.
 
-## Настройка
+## Быстрый старт: вся настройка в Python
 
-### Переменные окружения
+Ниже один полностью копируемый файл. Замените строковый placeholder ключом либо используйте безопасное чтение через `os.environ` (показано далее). Идентификаторы Gemini должны быть в lowercase и с дефисами. `gemini-3.7-flash` и `gemini-3.6-flash` здесь иллюстрируют требуемый формат: перед запуском сверьте реальные доступные ID со списком моделей вашего аккаунта.
 
-Основной способ настройки — `AI_MAGIC_CREDENTIALS`: JSON-массив credentials с полями `provider`, `key`, необязательными `model`, `models`, `headers` и `metadata`.
-
-Linux/macOS:
-
-```bash
-export AI_MAGIC_CREDENTIALS='[{"provider":"groq","key":"gsk_...","models":["llama-3.3-70b-versatile","llama-3.1-8b-instant"]}]'
-```
-
-PowerShell:
-
-```powershell
-$env:AI_MAGIC_CREDENTIALS='[{"provider":"groq","key":"gsk_...","models":["llama-3.3-70b-versatile","llama-3.1-8b-instant"]}]'
-```
-
-Для обратной совместимости одиночный provider также можно настроить так:
-
-```bash
-export AI_MAGIC_PROVIDER='groq'
-export GROQ_API_KEY='gsk_...'
-```
-
-Поддерживаются `GROQ_API_KEY`/`GROQ_API_KEYS` и `GEMINI_API_KEY`/`GEMINI_API_KEYS`; варианты во множественном числе принимают ключи через запятую. Для новых конфигураций предпочтителен `AI_MAGIC_CREDENTIALS`.
-
-### Настройка прямо в Python
 
 ```python
-from ai_magic import AsyncAIMagic, Settings
+import asyncio
+
+from ai_magic import AsyncAIMagic, Settings, chat, code
+
 
 settings = Settings(
-    credentials=[
-        {
-            "provider": "groq",
-            "key": "gsk_...",
-            "models": [
-                "llama-3.3-70b-versatile",
-                "llama-3.1-8b-instant",
-            ],
-        }
-    ],
-    primary_model="llama-3.3-70b-versatile",
-    fallback_model="llama-3.1-8b-instant",
-    timeout=60.0,
+    credentials=[{
+        "provider": "gemini",
+        "key": "PASTE_GEMINI_KEY_HERE",  # не коммитьте реальный ключ
+        "models": ["gemini-3.7-flash", "gemini-3.6-flash"],
+    }],
+    primary_model="gemini-3.7-flash",
+    fallback_model="gemini-3.6-flash",
+    timeout=60,
     max_retries=0,
-    max_credential_wait=30.0,
+    max_credential_wait=30,
 )
 
-client = AsyncAIMagic(settings)
+
+async def main() -> None:
+    async with AsyncAIMagic(settings) as client:
+        answer = await chat(
+            "Объясни async/await в трёх предложениях",
+            client=client,
+            temperature=0.2,
+            max_tokens=200,
+        )
+        print(answer)
+
+        source = await code(
+            "Напиши Python-функцию add(a, b) с type hints",
+            client=client,
+            temperature=0,
+            max_tokens=200,
+        )
+        print(source)
+
+        response = await client.chat.completions.create(
+            messages=[{"role": "user", "content": "Что такое event loop?"}],
+            model="gemini-3.7-flash",
+        )
+        print(response.choices[0].message.content)
+
+
+asyncio.run(main())
 ```
 
-Закрывайте созданный клиент через `async with` или `await client.aclose()`.
+Именно `await chat("...", client=client)` отвечает на вопрос «как вызвать chat». `async with` закрывает HTTP-клиент автоматически. Если создать `client = AsyncAIMagic(settings)` без контекстного менеджера, обязательно вызовите `await client.aclose()` в `finally`.
 
-### Один provider
+## Короткие Python-конфиги
 
-```bash
-export AI_MAGIC_CREDENTIALS='[{"provider":"gemini","key":"...","models":["gemini-2.0-flash"]}]'
-```
-
-При этом задайте соответствующие модели в Python:
-
-```python
-settings = Settings.from_env(
-    primary_model="gemini-2.0-flash",
-    fallback_model="gemini-2.0-flash",
-)
-```
-
-### Несколько ключей и моделей
-
-```bash
-export AI_MAGIC_CREDENTIALS='[
-  {"provider":"groq","key":"key-1","models":["llama-3.3-70b-versatile","llama-3.1-8b-instant"]},
-  {"provider":"groq","key":"key-2","models":["llama-3.3-70b-versatile","llama-3.1-8b-instant"]}
-]'
-```
-
-`model` задаёт default-модель credential. `models` задаёт список разрешённых моделей, а его первый элемент считается default, если `model` отсутствует. В публичном `AsyncAIMagic` запрос без `model=` использует `Settings.primary_model`; fallback использует `Settings.fallback_model`. Поэтому эти модели должны быть разрешены хотя бы одним credential.
-
-При HTTP 429, 5xx или transport error credential временно блокируется, и карусель пробует следующий совместимый credential. Заголовок `Retry-After` определяет срок блокировки. Ожидание ближайшей разблокировки ограничено `max_credential_wait` (по умолчанию 30 секунд).
-
-### Межпровайдерская ротация
-
-Ротация между провайдерами работает только для одной и той же модели, которую действительно поддерживают все участвующие провайдеры. Укажите её в `models` каждого credential:
-
-```bash
-export AI_MAGIC_CREDENTIALS='[
-  {"provider":"provider-a","key":"key-a","models":["shared-model"]},
-  {"provider":"provider-b","key":"key-b","models":["shared-model"]}
-]'
-```
+### Один provider: Gemini
 
 ```python
 from ai_magic import Settings
 
-settings = Settings.from_env(
-    primary_model="shared-model",
-    fallback_model="shared-model",
+settings = Settings(
+    credentials=[{"provider": "gemini", "key": "PASTE_KEY_HERE", "models": ["gemini-3.7-flash"]}],
+    primary_model="gemini-3.7-flash",
+    fallback_model="gemini-3.7-flash",
 )
 ```
 
-Не объявляйте модель совместимой только ради ротации: имена и доступность моделей определяются самими провайдерами. Credential без `model` и `models` принимает любую явно выбранную модель, поэтому ответственность за совместимость в таком случае лежит на приложении.
+Модель из примера может быть недоступна вашему аккаунту: используйте точный lowercase REST ID из доступного вам списка Gemini models.
 
-### Заголовки OpenRouter
-
-```bash
-export OPENROUTER_HTTP_REFERER='https://example.com'
-export OPENROUTER_X_TITLE='My Application'
-```
-
-То же можно настроить прямо в Python:
+### Один provider: Groq
 
 ```python
-settings = Settings.from_env(
-    openrouter_referer="https://example.com",
-    openrouter_title="My Application",
+from ai_magic import Settings
+
+settings = Settings(
+    credentials=[{"provider": "groq", "key": "PASTE_KEY_HERE", "models": ["llama-3.3-70b-versatile"]}],
+    primary_model="llama-3.3-70b-versatile",
+    fallback_model="llama-3.3-70b-versatile",
 )
 ```
 
-Произвольные заголовки конкретного credential задаются полем `headers` в `AI_MAGIC_CREDENTIALS` или `Credential.headers`.
+### Несколько ключей
+
+```python
+from ai_magic import Settings
+
+settings = Settings(credentials=[
+    {"provider": "groq", "key": "KEY_1", "models": ["llama-3.3-70b-versatile"]},
+    {"provider": "groq", "key": "KEY_2", "models": ["llama-3.3-70b-versatile"]},
+])
+```
+
+`model` задаёт default credential. Если `model` отсутствует, default — первый элемент `models`.
+
+При HTTP 429, 5xx или transport error credential временно блокируется, и карусель пробует следующий совместимый credential. Заголовок `Retry-After` определяет срок блокировки. Ожидание ближайшей разблокировки ограничено `max_credential_wait` (по умолчанию 30 секунд).
+
+### Несколько providers
+
+Без `model=` каждый credential использует собственную default-модель. Поэтому high-level `chat()`/`code()` и low-level вызов могут после retryable error перейти между providers, не отправляя Gemini ID в Groq или наоборот.
+
+```python
+from ai_magic import Settings
+
+settings = Settings(
+    credentials=[
+        {"provider": "gemini", "key": "GEMINI_KEY", "models": ["gemini-3.7-flash"]},
+        {"provider": "groq", "key": "GROQ_KEY", "models": ["llama-3.3-70b-versatile"]},
+    ],
+    # Глобальный fallback применяется только к credential, который объявил его в models.
+    primary_model="llama-3.3-70b-versatile",
+    fallback_model="llama-3.3-70b-versatile",
+)
+```
+
+Явный `model="..."` — строгий выбор: участвуют только credentials, чьи `models`/`model` разрешают этот ID. Credential без `model` и `models` для обратной совместимости принимает любой явный ID; для безопасной provider-aware маршрутизации всегда задавайте allow-list.
+
+`primary_model` сохраняет роль default для legacy-настройки `groq_api_keys`/`gemini_api_keys` и обозначает primary при явном запросе этой модели. Он больше не подменяет отсутствующий `model`. `fallback_model` пробуется после 429, 5xx, transport error или отсутствия доступного credential и также проходит строгую фильтрацию совместимости.
+
+### Параметры и `session_id`
+
+```python
+answer = await chat(
+    "Продолжи разговор",
+    client=client,
+    session_id="user-42",
+    model="gemini-3.7-flash",  # опустите для ротации по default-моделям
+    temperature=0.2,
+    max_tokens=300,
+)
+```
+
+### Безопасное чтение ключей
+
+```python
+import os
+from ai_magic import Settings
+
+settings = Settings(credentials=[{
+    "provider": "gemini",
+    "key": os.environ["GEMINI_API_KEY"],
+    "models": ["gemini-3.7-flash"],
+}])
+```
+
+Это рекомендуемый способ не хранить секрет в исходнике; shell-команды для библиотеки не обязательны. Для OpenRouter поля `openrouter_referer`, `openrouter_title` и credential `headers` также передаются прямо в `Settings`.
 
 ## High-level API: `chat()`
 
