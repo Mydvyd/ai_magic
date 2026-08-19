@@ -49,16 +49,18 @@ async def test_chat_builds_messages_normalizes_int_session_and_forwards_kwargs()
     )
 
     assert result == "answer"
-    assert client.completions.calls == [{
-        "messages": [
-            {"role": "system", "content": "rules"},
-            {"role": "user", "content": "hello"},
-        ],
-        "session_id": "42",
-        "model": "model-a",
-        "temperature": 0.25,
-        "max_tokens": 123,
-    }]
+    assert client.completions.calls == [
+        {
+            "messages": [
+                {"role": "system", "content": "rules"},
+                {"role": "user", "content": "hello"},
+            ],
+            "session_id": "42",
+            "model": "model-a",
+            "temperature": 0.25,
+            "max_tokens": 123,
+        }
+    ]
     assert client.close_calls == 0
 
 

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from .client import AsyncAIMagic
-
+from .dto import ChatMessage
 
 _CODE_SYSTEM_PROMPT = (
     "You are an expert software engineer. Return only the requested source code. "
@@ -11,9 +12,7 @@ _CODE_SYSTEM_PROMPT = (
     "text before or after the code."
 )
 
-_OUTER_CODE_FENCE = re.compile(
-    r"\A[ \t]*```[^\r\n]*\r?\n(?P<code>[\s\S]*?)\r?\n[ \t]*```[ \t]*\Z"
-)
+_OUTER_CODE_FENCE = re.compile(r"\A[ \t]*```[^\r\n]*\r?\n(?P<code>[\s\S]*?)\r?\n[ \t]*```[ \t]*\Z")
 
 
 def _normalize_session_id(session_id: str | int | None) -> str | None:
@@ -37,7 +36,7 @@ async def chat(
     client: AsyncAIMagic | None = None,
     session_id: str | int | None = None,
     system: str | None = None,
-    **kwargs: object,
+    **kwargs: Any,
 ) -> str:
     """Return an assistant response for a text prompt.
 
@@ -61,12 +60,12 @@ async def chat(
         TypeError: If ``session_id`` is not ``str``, ``int``, or ``None``.
         AIMagicError: If configuration, credentials, or a provider request fails.
         pydantic.ValidationError: If a forwarded completion option is invalid.
-        IndexError: If the provider returns no completion choices.
+        ProviderError: If the provider returns no completion choices.
     """
     normalized_session_id = _normalize_session_id(session_id)
     owned = client is None
     client = client or AsyncAIMagic()
-    messages: list[dict[str, str]] = []
+    messages: list[dict[str, Any] | ChatMessage] = []
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
@@ -87,7 +86,7 @@ async def code(
     *,
     client: AsyncAIMagic | None = None,
     session_id: str | int | None = None,
-    **kwargs: object,
+    **kwargs: Any,
 ) -> str:
     """Generate source code without Markdown fences or explanatory prose.
 
@@ -113,7 +112,7 @@ async def code(
         TypeError: If ``session_id`` is not ``str``, ``int``, or ``None``.
         AIMagicError: If configuration, credentials, or a provider request fails.
         pydantic.ValidationError: If a forwarded completion option is invalid.
-        IndexError: If the provider returns no completion choices.
+        ProviderError: If the provider returns no completion choices.
     """
     result = await chat(
         prompt,

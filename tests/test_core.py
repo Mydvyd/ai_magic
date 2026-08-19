@@ -1,10 +1,9 @@
 import asyncio
 import time
-from datetime import datetime, timedelta, timezone
-
-import httpx
+from datetime import UTC, datetime, timedelta
 from email.utils import format_datetime
 
+import httpx
 import pytest
 
 from ai_magic import chat
@@ -28,26 +27,32 @@ async def test_key_manager_round_robin_and_ban():
 
 def test_retry_after_seconds_and_date():
     assert parse_retry_after("3") == 3
-    future = format_datetime(datetime.now(timezone.utc) + timedelta(seconds=5))
+    future = format_datetime(datetime.now(UTC) + timedelta(seconds=5))
     assert 0 <= parse_retry_after(future) <= 6
 
 
 @pytest.mark.asyncio
 async def test_session_preserves_system_prompt():
     sessions = SessionManager(2)
-    result = await sessions.prepare("s", [ChatMessage(role="system", content="rules"), ChatMessage(role="user", content="one")])
+    result = await sessions.prepare(
+        "s", [ChatMessage(role="system", content="rules"), ChatMessage(role="user", content="one")]
+    )
     await sessions.append("s", ChatMessage(role="assistant", content="two"))
     result = await sessions.prepare("s", [ChatMessage(role="user", content="three")])
     assert any(m.role == "system" and m.content == "rules" for m in result)
 
 
 class FakeProvider:
-    def __init__(self): self.models = []
+    def __init__(self):
+        self.models = []
+
     async def create(self, request):
         self.models.append(request.model)
         if len(self.models) == 1:
             raise RateLimitError("limited", status_code=429, retry_after=1)
-        return ChatCompletion(model=request.model, choices=[Choice(message=ChatMessage(role="assistant", content="ok"))])
+        return ChatCompletion(
+            model=request.model, choices=[Choice(message=ChatMessage(role="assistant", content="ok"))]
+        )
 
 
 @pytest.mark.asyncio
@@ -80,11 +85,13 @@ async def test_model_fallback_without_network():
 
 def test_exact_gemini_python_config_and_model_id_validation():
     settings = Settings(
-        credentials=[{
-            "provider": "gemini",
-            "key": "placeholder-not-a-real-key",
-            "models": ["gemini-3.7-flash", "gemini-3.6-flash"],
-        }],
+        credentials=[
+            {
+                "provider": "gemini",
+                "key": "placeholder-not-a-real-key",
+                "models": ["gemini-3.7-flash", "gemini-3.6-flash"],
+            }
+        ],
         primary_model="gemini-3.7-flash",
         fallback_model="gemini-3.6-flash",
         timeout=60,
@@ -96,16 +103,24 @@ def test_exact_gemini_python_config_and_model_id_validation():
     asyncio.run(client.aclose())
 
     with pytest.raises(ValueError, match="Gemini model IDs"):
-        Settings(credentials=[{
-            "provider": "gemini",
-            "key": "placeholder",
-            "models": ["Gemini-3.7-Flash"],
-        }])
+        Settings(
+            credentials=[
+                {
+                    "provider": "gemini",
+                    "key": "placeholder",
+                    "models": ["Gemini-3.7-Flash"],
+                }
+            ]
+        )
 
 
 def test_registry_and_openrouter_headers():
-    registry = ProviderRegistry(builtin_provider_configs(openrouter_referer="https://app.example", openrouter_title="AI Magic"))
-    assert {"groq", "nvidia", "openrouter", "gemini", "together", "mistral", "cohere", "hyperbolic"} <= {name for name in registry._configs}
+    registry = ProviderRegistry(
+        builtin_provider_configs(openrouter_referer="https://app.example", openrouter_title="AI Magic")
+    )
+    assert {"groq", "nvidia", "openrouter", "gemini", "together", "mistral", "cohere", "hyperbolic"} <= {
+        name for name in registry._configs
+    }
     assert registry.get("openrouter").headers == {"HTTP-Referer": "https://app.example", "X-Title": "AI Magic"}
     registry.register_openai_compatible("custom", "https://custom.example/v1")
     assert registry.get("custom").url("model") == "https://custom.example/v1/chat/completions"
@@ -113,17 +128,28 @@ def test_registry_and_openrouter_headers():
 
 def test_cohere_adapter_mapping_and_response():
     adapter = CohereAdapter()
-    request = ChatCompletionRequest(model="command-r", messages=[
-        ChatMessage(role="system", content="Be concise"),
-        ChatMessage(role="user", content="first"),
-        ChatMessage(role="assistant", content="answer"),
-        ChatMessage(role="user", content="next"),
-    ])
+    request = ChatCompletionRequest(
+        model="command-r",
+        messages=[
+            ChatMessage(role="system", content="Be concise"),
+            ChatMessage(role="user", content="first"),
+            ChatMessage(role="assistant", content="answer"),
+            ChatMessage(role="user", content="next"),
+        ],
+    )
     payload = adapter.build(request, "command-r")
     assert payload["preamble"] == "Be concise"
     assert payload["message"] == "next"
     assert payload["chat_history"] == [{"role": "USER", "message": "first"}, {"role": "CHATBOT", "message": "answer"}]
-    response = adapter.parse({"generation_id": "g", "text": "done", "finish_reason": "COMPLETE", "meta": {"billed_units": {"input_tokens": 2, "output_tokens": 3}}}, "command-r")
+    response = adapter.parse(
+        {
+            "generation_id": "g",
+            "text": "done",
+            "finish_reason": "COMPLETE",
+            "meta": {"billed_units": {"input_tokens": 2, "output_tokens": 3}},
+        },
+        "command-r",
+    )
     assert response.choices[0].message.content == "done"
     assert response.usage.total_tokens == 5
 
@@ -145,10 +171,12 @@ class CarouselTransport:
 @pytest.mark.asyncio
 async def test_cross_provider_carousel_on_429():
     transport = CarouselTransport()
-    manager = KeyManager([
-        Credential(provider="cohere", key="secret-one", model="command-r"),
-        Credential(provider="groq", key="secret-two", model="groq-model"),
-    ])
+    manager = KeyManager(
+        [
+            Credential(provider="cohere", key="secret-one", model="command-r"),
+            Credential(provider="groq", key="secret-two", model="groq-model"),
+        ]
+    )
     provider = CarouselProvider(transport, manager, ProviderRegistry())
     response = await provider.create(ChatCompletionRequest(messages=[ChatMessage(role="user", content="hi")]))
     assert response.choices[0].message.content == "ok"
@@ -190,10 +218,12 @@ class RecordingTransport:
 @pytest.mark.asyncio
 async def test_single_provider_key_rotation():
     transport = RecordingTransport(failures=1)
-    manager = KeyManager([
-        Credential("groq", "one", models=("primary",)),
-        Credential("groq", "two", models=("primary",)),
-    ])
+    manager = KeyManager(
+        [
+            Credential("groq", "one", models=("primary",)),
+            Credential("groq", "two", models=("primary",)),
+        ]
+    )
     response = await CarouselProvider(transport, manager, ProviderRegistry()).create(
         ChatCompletionRequest(model="primary", messages=[ChatMessage(role="user", content="hi")])
     )
@@ -215,11 +245,13 @@ async def test_explicit_fallback_model_overrides_credential_default():
 @pytest.mark.asyncio
 async def test_provider_aware_model_selection_skips_incompatible_provider():
     transport = RecordingTransport()
-    manager = KeyManager([
-        Credential("gemini", "gemini-key", models=("gemini-2.0-flash",)),
-        Credential("cohere", "cohere-key", models=("command-r",)),
-        Credential("groq", "groq-key", models=("llama-fallback",)),
-    ])
+    manager = KeyManager(
+        [
+            Credential("gemini", "gemini-key", models=("gemini-2.0-flash",)),
+            Credential("cohere", "cohere-key", models=("command-r",)),
+            Credential("groq", "groq-key", models=("llama-fallback",)),
+        ]
+    )
     response = await CarouselProvider(transport, manager, ProviderRegistry()).create(
         ChatCompletionRequest(model="llama-fallback", messages=[ChatMessage(role="user", content="hi")])
     )
@@ -264,5 +296,6 @@ async def test_max_wait_prevents_infinite_unban_loop():
     manager = KeyManager([credential], max_wait=0.01)
     await manager.ban(credential, 1)
     from ai_magic.exceptions import AllKeysUnavailableError
+
     with pytest.raises(AllKeysUnavailableError):
         await asyncio.wait_for(manager.acquire_credential(), timeout=0.1)
